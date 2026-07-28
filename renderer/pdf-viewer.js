@@ -160,7 +160,7 @@ class PDFViewer {
 
     if (pageDesc.type === 'pdf' && this.pdfDoc) {
       const pdfPage = await this.pdfDoc.getPage(pageDesc.pdfPageIndex);
-      
+
       // Cache base sizes on load
       if (!pageDesc.baseWidth || !pageDesc.baseHeight) {
         const vp1 = pdfPage.getViewport({ scale: 1.0 });
@@ -248,8 +248,8 @@ class PDFViewer {
     wrapper.style.width = `${width}px`;
     wrapper.style.height = `${height}px`;
 
-    const deleteBtn = isBlank 
-      ? `<button class="page-del-badge-btn" title="Delete blank page" onclick="window.appState.pdfViewer.deletePage(${pageIndex})">✕</button>` 
+    const deleteBtn = isBlank
+      ? `<button class="page-del-badge-btn" title="Delete blank page" onclick="window.appState.pdfViewer.deletePage(${pageIndex})">✕</button>`
       : '';
 
     wrapper.innerHTML = `
@@ -364,7 +364,7 @@ class PDFViewer {
   async deletePage(pageIndex) {
     if (this.pages.length <= 1) { showToast('Cannot delete the only page', 'error'); return; }
     this.pages.splice(pageIndex, 1);
-    
+
     // Shift all annotations/undo/redo stacks for pages after pageIndex down by 1
     const shiftKeysDelete = (map) => {
       const keys = Object.keys(map).map(Number).sort((a, b) => a - b);

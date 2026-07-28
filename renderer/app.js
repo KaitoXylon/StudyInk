@@ -574,11 +574,12 @@ class AppState {
 
       if (ctrl && e.key === 'o') { e.preventDefault(); this.openFile(); }
       if (ctrl && e.key === 's') { e.preventDefault(); this.exportManager.save(false); }
-      if (ctrl && e.key === 'z') { e.preventDefault();
+      if (ctrl && e.key === 'z') {
+        e.preventDefault();
         if (this.splitViewManager && this.splitViewManager.isOpen) {
           const pState = this.splitViewManager.getActivePaneState();
-          const side   = this.splitViewManager.focusedPane;
-          const page   = this.splitViewManager.getCurrentPanePage(side);
+          const side = this.splitViewManager.focusedPane;
+          const page = this.splitViewManager.getCurrentPanePage(side);
           const canvas = document.querySelector(`#split-pages-${side} .page-wrapper[data-page="${page}"] .page-annotation-canvas`);
           if (canvas && pState) pState.annotEngine.undo(page, canvas);
         } else {
@@ -587,11 +588,12 @@ class AppState {
           if (canvas) this.annotationEngine.undo(page, canvas);
         }
       }
-      if (ctrl && (e.key === 'y' || (e.shiftKey && e.key === 'z'))) { e.preventDefault();
+      if (ctrl && (e.key === 'y' || (e.shiftKey && e.key === 'z'))) {
+        e.preventDefault();
         if (this.splitViewManager && this.splitViewManager.isOpen) {
           const pState = this.splitViewManager.getActivePaneState();
-          const side   = this.splitViewManager.focusedPane;
-          const page   = this.splitViewManager.getCurrentPanePage(side);
+          const side = this.splitViewManager.focusedPane;
+          const page = this.splitViewManager.getCurrentPanePage(side);
           const canvas = document.querySelector(`#split-pages-${side} .page-wrapper[data-page="${page}"] .page-annotation-canvas`);
           if (canvas && pState) pState.annotEngine.redo(page, canvas);
         } else {

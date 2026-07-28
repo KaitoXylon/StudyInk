@@ -118,9 +118,10 @@ class FloatingToolbar {
     });
 
     this.sizeSlider.addEventListener('input', () => {
-      const val = parseInt(this.sizeSlider.value);
+      const val = parseFloat(this.sizeSlider.value);
       this.annotEngine.toolState.size = val;
-      this.annotEngine.toolState.highlighterSize = val * 5;
+      this.annotEngine.toolState.highlighterSize = Math.max(2, val * 5);
+      this.sizeSlider.title = `Brush Size: ${val}`;
     });
   }
 
@@ -176,6 +177,11 @@ class FloatingToolbar {
     const initialTool = this.annotEngine.toolState.tool;
     const btn = this.el.querySelector(`.ft-btn[data-tool="${initialTool}"]`);
     if (btn) btn.classList.add('active');
+    if (this.sizeSlider) {
+      const sz = this.annotEngine.toolState.size || 2;
+      this.sizeSlider.value = sz;
+      this.sizeSlider.title = `Brush Size: ${sz}`;
+    }
   }
 
   setTool(tool) {

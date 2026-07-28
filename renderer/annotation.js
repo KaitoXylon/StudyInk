@@ -50,13 +50,13 @@ class AnnotationEngine {
 
     const onPointerDown = (e) => this.onPointerDown(e, canvas, pageIndex);
     const onPointerMove = (e) => this.onPointerMove(e, canvas, pageIndex);
-    const onPointerUp   = (e) => this.onPointerUp(e, canvas, pageIndex);
+    const onPointerUp = (e) => this.onPointerUp(e, canvas, pageIndex);
 
-    canvas.addEventListener('pointerdown',   onPointerDown, { passive: false });
-    canvas.addEventListener('pointermove',   onPointerMove, { passive: false });
-    canvas.addEventListener('pointerup',     onPointerUp);
+    canvas.addEventListener('pointerdown', onPointerDown, { passive: false });
+    canvas.addEventListener('pointermove', onPointerMove, { passive: false });
+    canvas.addEventListener('pointerup', onPointerUp);
     canvas.addEventListener('pointercancel', onPointerUp);
-    canvas.addEventListener('pointerleave',  onPointerUp);
+    canvas.addEventListener('pointerleave', onPointerUp);
 
     canvas._annotHandlers = { onPointerDown, onPointerMove, onPointerUp };
   }
@@ -102,7 +102,7 @@ class AnnotationEngine {
     if (tool === 'eraser') {
       const wrapper = canvas.closest('.page-wrapper');
       const annotCanvas = wrapper.querySelector('.page-annotation-canvas');
-      this.eraseAt(annotCanvas, pageIndex, pos.x, pos.y, this.toolState.size * 4);
+      this.eraseAt(annotCanvas, pageIndex, pos.x, pos.y, Math.max(8, this.toolState.size * 4));
     }
   }
 
@@ -116,13 +116,13 @@ class AnnotationEngine {
     if (this.toolState.tool === 'eraser') {
       const wrapper = canvas.closest('.page-wrapper');
       const annotCanvas = wrapper.querySelector('.page-annotation-canvas');
-      this.eraseAt(annotCanvas, pageIndex, pos.x, pos.y, this.toolState.size * 4);
+      this.eraseAt(annotCanvas, pageIndex, pos.x, pos.y, Math.max(8, this.toolState.size * 4));
       return;
     }
 
     const coalesced = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
     const ctx = canvas.getContext('2d');
-    
+
     ctx.save();
     const zoom = window.appState ? window.appState.pdfViewer.zoom : 1.0;
     const dpr = window.devicePixelRatio || 1;
@@ -196,7 +196,7 @@ class AnnotationEngine {
     if (annotCanvas) {
       this.redrawPage(annotCanvas, pageIndex);
     }
-    
+
     this.currentStroke = null;
 
     if (window.appState) window.appState.scheduleAutoSave();
@@ -256,8 +256,8 @@ class AnnotationEngine {
         ctx.stroke();
       } else {
         for (let i = 1; i < points.length - 1; i++) {
-          const mx = (points[i].x + points[i+1].x) / 2;
-          const my = (points[i].y + points[i+1].y) / 2;
+          const mx = (points[i].x + points[i + 1].x) / 2;
+          const my = (points[i].y + points[i + 1].y) / 2;
           ctx.quadraticCurveTo(points[i].x, points[i].y, mx, my);
         }
         const last = points[points.length - 1];
