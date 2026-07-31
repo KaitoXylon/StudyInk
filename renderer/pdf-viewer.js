@@ -173,7 +173,7 @@ class PDFViewer {
       width = Math.floor(cssVP.width);
       height = Math.floor(cssVP.height);
 
-      const wrapper = this.createPageWrapper(pageIndex, width, height, false);
+      const wrapper = this.createPageWrapper(pageIndex, width, height, false, pageDesc.baseWidth, pageDesc.baseHeight);
       this.insertWrapperAtIndex(wrapper, pageIndex);
 
       // PDF canvas
@@ -195,7 +195,7 @@ class PDFViewer {
       width = Math.floor(pageDesc.baseWidth * this.zoom);
       height = Math.floor(pageDesc.baseHeight * this.zoom);
 
-      const wrapper = this.createPageWrapper(pageIndex, width, height, true);
+      const wrapper = this.createPageWrapper(pageIndex, width, height, true, pageDesc.baseWidth, pageDesc.baseHeight);
       this.insertWrapperAtIndex(wrapper, pageIndex);
     }
 
@@ -241,10 +241,12 @@ class PDFViewer {
     pageDesc.rendered = true;
   }
 
-  createPageWrapper(pageIndex, width, height, isBlank = false) {
+  createPageWrapper(pageIndex, width, height, isBlank = false, baseWidth = 595, baseHeight = 842) {
     const wrapper = document.createElement('div');
     wrapper.className = 'page-wrapper';
     wrapper.dataset.page = pageIndex;
+    wrapper.dataset.baseWidth = baseWidth;
+    wrapper.dataset.baseHeight = baseHeight;
     wrapper.style.width = `${width}px`;
     wrapper.style.height = `${height}px`;
 

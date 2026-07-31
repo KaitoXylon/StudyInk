@@ -117,6 +117,14 @@ class FloatingToolbar {
       });
     });
 
+    document.getElementById('ft-btn-paste')?.addEventListener('click', () => {
+      if (window.appState) window.appState.pasteClipboardImage();
+    });
+
+    document.getElementById('ft-btn-copy-drawing')?.addEventListener('click', () => {
+      if (window.appState) window.appState.copyCurrentPageDrawing();
+    });
+
     this.sizeSlider.addEventListener('input', () => {
       const val = parseFloat(this.sizeSlider.value);
       this.annotEngine.toolState.size = val;
@@ -188,6 +196,35 @@ class FloatingToolbar {
     this.el.querySelectorAll('.ft-btn[data-tool]').forEach(b => b.classList.remove('active'));
     const btn = this.el.querySelector(`.ft-btn[data-tool="${tool}"]`);
     if (btn) btn.classList.add('active');
+  }
+
+  changePenSize(delta) {
+    const current = this.annotEngine.toolState.size || 2;
+    const newSize = Math.max(0.5, Math.min(15, Math.round((current + delta) * 10) / 10));
+    this.annotEngine.toolState.size = newSize;
+    this.annotEngine.toolState.highlighterSize = Math.max(2, newSize * 5);
+    if (this.sizeSlider) {
+      this.sizeSlider.value = newSize;
+      this.sizeSlider.title = `Brush Size: ${newSize}`;
+    }
+    showToast(`Pen size: ${newSize}px`);
+  }
+
+  cyclePenColor(direction) {
+    const swatches = Array.from(this.el.querySelectorAll('.ft-swatch'));
+    if (swatches.length === 0) return;
+    const colors = swatches.map(s => s.dataset.color);
+    const current = this.annotEngine.toolState.color;
+    let idx = colors.indexOf(current);
+    if (idx === -1) idx = 0;
+
+    let nextIdx = (idx + direction + colors.length) % colors.length;
+    const nextColor = colors[nextIdx];
+    this.setColor(nextColor);
+
+    swatches.forEach((s, i) => s.classList.toggle('active', i === nextIdx));
+    const title = swatches[nextIdx].title || 'Color';
+    showToast(`Pen color: ${title}`);
   }
 }
 

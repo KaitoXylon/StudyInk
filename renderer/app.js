@@ -202,14 +202,27 @@ class AppState {
     }
   }
 
+  scheduleSaveSettings() {
+    clearTimeout(this.saveSettingsTimer);
+    this.saveSettingsTimer = setTimeout(() => this.saveSettings(), 1000);
+  }
+
   async saveSettings() {
     const recentPaths = this.sidebar.openFiles.map(f => f.path);
     const activeFile = this.sidebar.getCurrentFile();
+    const currentPage = this.pdfViewer ? this.pdfViewer.getCurrentPage() : 0;
     const settings = {
       theme: this.themeManager.getState(),
+      isLightMode: this.isLightMode,
       recentFiles: recentPaths,
       activeFilePath: activeFile ? activeFile.path : null,
-      panelWidth: document.getElementById('right-panel').style.width
+      lastPage: currentPage,
+      zoom: this.pdfViewer ? this.pdfViewer.zoom : 1.0,
+      panelWidth: document.getElementById('right-panel').style.width,
+      splitView: (this.splitViewManager && this.splitViewManager.isOpen) ? {
+        leftPath: this.splitViewManager.leftState?.filePath,
+        rightPath: this.splitViewManager.rightState?.filePath,
+      } : null
     };
     await window.studyAPI.saveSettings(settings);
   }
@@ -217,7 +230,12 @@ class AppState {
   async loadSettings() {
     const result = await window.studyAPI.loadSettings();
     if (result.success && result.data) {
-      this.themeManager.restoreState(result.data.theme);
+      if (result.data.theme) this.themeManager.restoreState(result.data.theme);
+
+      // Restore dark / light mode
+      if (result.data.isLightMode && !this.isLightMode) {
+        this.toggleLightMode();
+      }
 
       // Restore resizable sidebar width
       if (result.data.panelWidth) {
@@ -231,6 +249,28 @@ class AppState {
           const makeActive = (filePath === activePath);
           await this.openFileFromPath(filePath, makeActive);
         }
+
+        // Restore zoom level & last viewed page
+        if (typeof result.data.lastPage === 'number' && result.data.lastPage >= 0) {
+          setTimeout(() => {
+            if (this.pdfViewer) {
+              if (typeof result.data.zoom === 'number') {
+                this.pdfViewer.setZoom(result.data.zoom);
+              }
+              this.pdfViewer.scrollToPage(result.data.lastPage);
+            }
+          }, 350);
+        }
+      }
+
+      // Restore split view session if active
+      if (result.data.splitView && result.data.splitView.leftPath && result.data.splitView.rightPath) {
+        setTimeout(async () => {
+          if (this.splitViewManager) {
+            if (!this.isFullscreen) this.toggleFullscreen();
+            await this.splitViewManager.openSplitView(result.data.splitView.leftPath, result.data.splitView.rightPath);
+          }
+        }, 600);
       }
     }
   }
@@ -241,7 +281,16 @@ class AppState {
     // Window controls
     document.getElementById('btn-minimize').addEventListener('click', () => window.studyAPI.minimize());
     document.getElementById('btn-maximize').addEventListener('click', () => window.studyAPI.maximize());
-    document.getElementById('btn-close').addEventListener('click', () => window.studyAPI.close());
+    document.getElementById('btn-close').addEventListener('click', async () => {
+      await this.autoSave();
+      await this.saveSettings();
+      window.studyAPI.close();
+    });
+
+    window.addEventListener('beforeunload', () => {
+      this.autoSave();
+      this.saveSettings();
+    });
 
     // Open file & New Notebook buttons
     document.getElementById('btn-open').addEventListener('click', () => this.openFile());
@@ -276,6 +325,8 @@ class AppState {
         this.floatingToolbar.setTool(tool);
       });
     });
+
+    document.getElementById('btn-paste-image')?.addEventListener('click', () => this.pasteClipboardImage());
 
     // Undo/Redo
     document.getElementById('btn-undo').addEventListener('click', () => {
@@ -429,13 +480,14 @@ class AppState {
       });
     });
 
-    // Track scroll to update current page
+    // Track scroll to update current page and save session position
     document.getElementById('pdf-viewport')?.addEventListener('scroll', () => {
       this.currentPage = this.pdfViewer.getCurrentPage();
       // Update thumbnail highlight
       document.querySelectorAll('.thumb-item').forEach((t, i) => {
         t.classList.toggle('active', i === this.currentPage);
       });
+      this.scheduleSaveSettings();
     });
 
     // Split View button (only visible in fullscreen)
@@ -566,6 +618,113 @@ class AppState {
     showToast(`Tool: ${tool.toUpperCase()}`);
   }
 
+  async pasteClipboardImage(clipboardData = null) {
+    let dataUrl = null;
+
+    if (clipboardData && clipboardData.items) {
+      for (const item of clipboardData.items) {
+        if (item.type.startsWith('image/')) {
+          const file = item.getAsFile();
+          if (file) {
+            dataUrl = await new Promise((resolve) => {
+              const reader = new FileReader();
+              reader.onload = (e) => resolve(e.target.result);
+              reader.onerror = () => resolve(null);
+              reader.readAsDataURL(file);
+            });
+          }
+          break;
+        }
+      }
+    }
+
+    if (!dataUrl && window.studyAPI?.readClipboardImage) {
+      dataUrl = await window.studyAPI.readClipboardImage();
+    }
+
+    if (!dataUrl) {
+      showToast('No screenshot/image found in clipboard', 'error');
+      return;
+    }
+
+    let activeAnnotEngine = this.annotationEngine;
+    let targetPage = this.pdfViewer.getCurrentPage();
+    let wrapper = document.querySelector(`.page-wrapper[data-page="${targetPage}"]`);
+
+    if (this.splitViewManager && this.splitViewManager.isOpen) {
+      const side = this.splitViewManager.focusedPane || 'left';
+      const paneState = this.splitViewManager.getActivePaneState();
+      if (paneState) {
+        activeAnnotEngine = paneState.annotEngine;
+        targetPage = this.splitViewManager.getCurrentPanePage(side);
+        wrapper = document.querySelector(`#split-pages-${side} .page-wrapper[data-page="${targetPage}"][data-pane="${side}"]`);
+      }
+    }
+
+    if (!wrapper) {
+      showToast('Open a PDF page to paste screenshot', 'error');
+      return;
+    }
+
+    activeAnnotEngine.addImageStamp(wrapper, targetPage, dataUrl);
+    showToast('Screenshot pasted ✓', 'success');
+  }
+
+  async copyCurrentPageDrawing() {
+    let targetPage = this.pdfViewer.getCurrentPage();
+    let side = null;
+    let isSplit = false;
+
+    if (this.splitViewManager && this.splitViewManager.isOpen) {
+      isSplit = true;
+      side = this.splitViewManager.focusedPane || 'left';
+      targetPage = this.splitViewManager.getCurrentPanePage(side);
+    }
+
+    const wrapper = isSplit
+      ? document.querySelector(`#split-pages-${side} .page-wrapper[data-page="${targetPage}"][data-pane="${side}"]`)
+      : document.querySelector(`.page-wrapper[data-page="${targetPage}"]`);
+
+    if (!wrapper) {
+      showToast('No active page found to copy drawing', 'error');
+      return;
+    }
+
+    const annotCanvas = wrapper.querySelector('.page-annotation-canvas');
+    if (!annotCanvas || annotCanvas.width === 0 || annotCanvas.height === 0) {
+      showToast('No drawing found on current page', 'error');
+      return;
+    }
+
+    const pageData = isSplit
+      ? this.splitViewManager.getActivePaneState()?.annotEngine?.getPageData(targetPage)
+      : this.annotationEngine.getPageData(targetPage);
+
+    if (!pageData || !pageData.strokes || pageData.strokes.length === 0) {
+      showToast(`No drawings on page ${targetPage + 1}`, 'error');
+      return;
+    }
+
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = annotCanvas.width;
+    tempCanvas.height = annotCanvas.height;
+    const ctx = tempCanvas.getContext('2d');
+    ctx.drawImage(annotCanvas, 0, 0);
+
+    const dataUrl = tempCanvas.toDataURL('image/png');
+
+    if (window.studyAPI?.writeClipboardImage) {
+      const res = await window.studyAPI.writeClipboardImage(dataUrl);
+      if (res && res.success) {
+        showToast(`Drawing on page ${targetPage + 1} copied to clipboard ✓`, 'success');
+      } else {
+        showToast('Failed to copy drawing', 'error');
+      }
+    } else {
+      showToast('Clipboard write not available', 'error');
+    }
+  }
+
   // ── Keyboard Shortcuts ──────────────────────────────────────────────────
 
   bindKeyboard() {
@@ -605,6 +764,12 @@ class AppState {
       if (ctrl && e.key === 'f') { e.preventDefault(); this.openRightPanel('search'); }
       if (ctrl && e.key === '=') { e.preventDefault(); this.pdfViewer.setZoom(this.pdfViewer.zoom + 0.15); }
       if (ctrl && e.key === '-') { e.preventDefault(); this.pdfViewer.setZoom(this.pdfViewer.zoom - 0.15); }
+      if (ctrl && e.key.toLowerCase() === 'v') {
+        if (!['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) {
+          e.preventDefault();
+          this.pasteClipboardImage();
+        }
+      }
 
       // F11 toggles fullscreen
       if (e.key === 'F11') { e.preventDefault(); this.toggleFullscreen(); }
@@ -618,6 +783,10 @@ class AppState {
         if (key === '1' || code === 'Digit1') tool = 'pen';
         else if (key === '2' || code === 'Digit2') tool = 'eraser';
         else if (key === '3' || code === 'Digit3') tool = 'highlighter';
+        else if (key === '4' || code === 'Digit4') {
+          e.preventDefault();
+          this.copyCurrentPageDrawing();
+        }
         else if (key === 'p' || code === 'KeyP') tool = 'pen';
         else if (key === 'e' || code === 'KeyE') tool = 'eraser';
         else if (key === 'h' || code === 'KeyH') tool = 'highlighter';
@@ -628,6 +797,21 @@ class AppState {
         else if (key === 'b' || code === 'KeyB') {
           e.preventDefault();
           this.bookmarkManager.toggleBookmark();
+        }
+
+        // Arrow keys: Up/Down change pen size, Left/Right change pen color
+        if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          this.floatingToolbar.changePenSize(0.5);
+        } else if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          this.floatingToolbar.changePenSize(-0.5);
+        } else if (e.key === 'ArrowRight') {
+          e.preventDefault();
+          this.floatingToolbar.cyclePenColor(1);
+        } else if (e.key === 'ArrowLeft') {
+          e.preventDefault();
+          this.floatingToolbar.cyclePenColor(-1);
         }
 
         if (tool) {
@@ -655,6 +839,16 @@ class AppState {
         this.pdfViewer.setZoom(this.pdfViewer.zoom + delta);
       }
     }, { passive: false });
+
+    // Paste event listener for images/screenshots
+    document.addEventListener('paste', (e) => {
+      if (!['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) {
+        if (e.clipboardData && Array.from(e.clipboardData.items).some(item => item.type.startsWith('image/'))) {
+          e.preventDefault();
+          this.pasteClipboardImage(e.clipboardData);
+        }
+      }
+    });
   }
 }
 

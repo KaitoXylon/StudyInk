@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, Menu, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, Menu, shell, clipboard, nativeImage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
@@ -163,6 +163,30 @@ ipcMain.handle('save-settings', async (event, settings) => {
     fs.writeFileSync(settingsFile, JSON.stringify(settings, null, 2));
     return { success: true };
   } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+// Read image from system clipboard
+ipcMain.handle('read-clipboard-image', () => {
+  try {
+    const image = clipboard.readImage();
+    if (image.isEmpty()) return null;
+    return image.toDataURL();
+  } catch (err) {
+    console.error('Failed to read clipboard image:', err);
+    return null;
+  }
+});
+
+// Write image to system clipboard
+ipcMain.handle('write-clipboard-image', (event, dataUrl) => {
+  try {
+    const image = nativeImage.createFromDataURL(dataUrl);
+    clipboard.writeImage(image);
+    return { success: true };
+  } catch (err) {
+    console.error('Failed to write clipboard image:', err);
     return { success: false, error: err.message };
   }
 });

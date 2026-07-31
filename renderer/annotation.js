@@ -28,7 +28,10 @@ class AnnotationEngine {
 
   getPageData(pageIndex) {
     if (!this.pages[pageIndex]) {
-      this.pages[pageIndex] = { strokes: [], textBoxes: [], stickyNotes: [] };
+      this.pages[pageIndex] = { strokes: [], textBoxes: [], stickyNotes: [], imageStamps: [] };
+    }
+    if (!this.pages[pageIndex].imageStamps) {
+      this.pages[pageIndex].imageStamps = [];
     }
     return this.pages[pageIndex];
   }
@@ -61,14 +64,37 @@ class AnnotationEngine {
     canvas._annotHandlers = { onPointerDown, onPointerMove, onPointerUp };
   }
 
+  getBaseDimensions(el) {
+    const wrapper = el ? (el.classList.contains('page-wrapper') ? el : el.closest('.page-wrapper')) : null;
+    let baseWidth = 595;
+    let baseHeight = 842;
+    if (wrapper) {
+      if (wrapper.dataset.baseWidth) baseWidth = parseFloat(wrapper.dataset.baseWidth);
+      if (wrapper.dataset.baseHeight) baseHeight = parseFloat(wrapper.dataset.baseHeight);
+    }
+    return { baseWidth, baseHeight };
+  }
+
+  getPageScale(pageWrapper) {
+    if (!pageWrapper) return 1.0;
+    const wrapper = pageWrapper.classList.contains('page-wrapper') ? pageWrapper : pageWrapper.closest('.page-wrapper');
+    if (!wrapper) return 1.0;
+    const { baseWidth } = this.getBaseDimensions(wrapper);
+    const rect = wrapper.getBoundingClientRect();
+    const currentWidth = (rect && rect.width > 0) ? rect.width : (parseFloat(wrapper.style.width) || baseWidth);
+    return currentWidth / baseWidth;
+  }
+
   getRelativePos(e, canvas) {
     const rect = canvas.getBoundingClientRect();
     const cssX = e.clientX - rect.left;
     const cssY = e.clientY - rect.top;
-    const zoom = window.appState ? window.appState.pdfViewer.zoom : 1.0;
+    const { baseWidth, baseHeight } = this.getBaseDimensions(canvas);
+    const scaleX = rect.width > 0 ? (rect.width / baseWidth) : 1.0;
+    const scaleY = rect.height > 0 ? (rect.height / baseHeight) : 1.0;
     return {
-      x: cssX / zoom,
-      y: cssY / zoom
+      x: cssX / scaleX,
+      y: cssY / scaleY
     };
   }
 
@@ -123,10 +149,12 @@ class AnnotationEngine {
     const coalesced = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
     const ctx = canvas.getContext('2d');
 
+    const { baseWidth, baseHeight } = this.getBaseDimensions(canvas);
+    const scaleX = baseWidth > 0 ? (canvas.width / baseWidth) : 1.0;
+    const scaleY = baseHeight > 0 ? (canvas.height / baseHeight) : 1.0;
+
     ctx.save();
-    const zoom = window.appState ? window.appState.pdfViewer.zoom : 1.0;
-    const dpr = window.devicePixelRatio || 1;
-    ctx.scale(zoom * dpr, zoom * dpr);
+    ctx.scale(scaleX, scaleY);
 
     ctx.strokeStyle = this.currentStroke.color;
     ctx.lineWidth = this.currentStroke.size;
@@ -297,10 +325,12 @@ class AnnotationEngine {
     const ctx = canvas.getContext('2d');
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+    const { baseWidth, baseHeight } = this.getBaseDimensions(canvas);
+    const scaleX = baseWidth > 0 ? (canvas.width / baseWidth) : 1.0;
+    const scaleY = baseHeight > 0 ? (canvas.height / baseHeight) : 1.0;
+
     ctx.save();
-    const zoom = window.appState ? window.appState.pdfViewer.zoom : 1.0;
-    const dpr = window.devicePixelRatio || 1;
-    ctx.scale(zoom * dpr, zoom * dpr);
+    ctx.scale(scaleX, scaleY);
 
     const pageData = this.getPageData(pageIndex);
     // Draw highlighters first
@@ -322,17 +352,19 @@ class AnnotationEngine {
     this.redrawPageCanvas(canvas, pageIndex);
   }
 
-  renderTextBoxDOM(pageWrapper, pageIndex, entry, zoom) {
+  renderTextBoxDOM(pageWrapper, pageIndex, entry) {
     const container = pageWrapper.querySelector('.page-overlays');
     if (!container) return;
 
+    const scale = this.getPageScale(pageWrapper);
+
     const box = document.createElement('div');
     box.className = 'text-overlay';
-    box.style.cssText = `left:${entry.x * zoom}px; top:${entry.y * zoom}px; position:absolute; min-width:120px; min-height:30px; pointer-events:auto;`;
+    box.style.cssText = `left:${entry.x * scale}px; top:${entry.y * scale}px; position:absolute; min-width:${Math.max(60, 120 * scale)}px; min-height:${Math.max(20, 30 * scale)}px; pointer-events:auto;`;
 
     const ta = document.createElement('textarea');
     ta.value = entry.text;
-    ta.style.cssText = `font-size:${entry.fontSize * zoom}px; color:${entry.color || this.toolState.color}; min-height:30px;`;
+    ta.style.cssText = `font-size:${Math.max(8, entry.fontSize * scale)}px; color:${entry.color || this.toolState.color}; min-height:${Math.max(20, 30 * scale)}px; background:transparent; border:none; outline:none; resize:none; font-family:inherit; padding:2px;`;
     ta.placeholder = 'Type here...';
     ta.rows = 1;
 
@@ -358,12 +390,12 @@ class AnnotationEngine {
   }
 
   addTextBox(pageWrapper, pageIndex, cssX, cssY) {
-    const zoom = window.appState ? window.appState.pdfViewer.zoom : 1.0;
+    const scale = this.getPageScale(pageWrapper);
     const baseFontSize = this.toolState.size * 4 + 8;
     const entry = {
       type: 'textbox',
-      x: cssX / zoom,
-      y: cssY / zoom,
+      x: cssX / scale,
+      y: cssY / scale,
       text: '',
       fontSize: baseFontSize,
       color: this.toolState.color
@@ -371,25 +403,32 @@ class AnnotationEngine {
 
     this.saveUndoState(pageIndex);
     this.getPageData(pageIndex).textBoxes.push(entry);
-    this.renderTextBoxDOM(pageWrapper, pageIndex, entry, zoom);
+    this.renderTextBoxDOM(pageWrapper, pageIndex, entry);
   }
 
-  renderStickyNoteDOM(pageWrapper, pageIndex, entry, zoom) {
+  renderStickyNoteDOM(pageWrapper, pageIndex, entry) {
     const container = pageWrapper.querySelector('.page-overlays');
     if (!container) return;
 
+    const scale = this.getPageScale(pageWrapper);
+
     const note = document.createElement('div');
     note.className = 'sticky-note';
-    note.style.cssText = `left:${entry.x * zoom}px; top:${entry.y * zoom}px; background:${entry.color}; position:absolute; pointer-events:auto;`;
+    const noteW = Math.max(100, 180 * scale);
+    const noteH = Math.max(80, 140 * scale);
+    const fontSize = Math.max(9, 12 * scale);
+    note.style.cssText = `left:${entry.x * scale}px; top:${entry.y * scale}px; width:${noteW}px; height:${noteH}px; background:${entry.color}; position:absolute; pointer-events:auto; font-size:${fontSize}px; display:flex; flex-direction:column; border-radius:6px; box-shadow:0 4px 12px rgba(0,0,0,0.3); padding:4px; border:1px solid rgba(0,0,0,0.1);`;
 
     const header = document.createElement('div');
     header.className = 'sticky-header';
-    header.innerHTML = `<span>📝 Note</span><button class="sticky-del-btn" title="Delete">✕</button>`;
+    header.style.cssText = `display:flex; justify-content:space-between; align-items:center; cursor:move; padding-bottom:4px; font-weight:600; font-size:${fontSize * 0.9}px; user-select:none; color:rgba(0,0,0,0.7);`;
+    header.innerHTML = `<span>📝 Note</span><button class="sticky-del-btn" title="Delete" style="background:none;border:none;cursor:pointer;font-size:${fontSize}px;color:rgba(0,0,0,0.5);">✕</button>`;
 
     const body = document.createElement('textarea');
     body.className = 'sticky-body';
     body.placeholder = 'Write your note here...';
     body.value = entry.text;
+    body.style.cssText = `flex:1; width:100%; border:none; background:transparent; resize:none; outline:none; font-size:${fontSize}px; color:#1a1a2e; font-family:inherit;`;
 
     note.appendChild(header);
     note.appendChild(body);
@@ -415,20 +454,195 @@ class AnnotationEngine {
   }
 
   addStickyNote(pageWrapper, pageIndex, cssX, cssY) {
-    const zoom = window.appState ? window.appState.pdfViewer.zoom : 1.0;
+    const scale = this.getPageScale(pageWrapper);
     const colors = ['#ffd166', '#ff6b6b', '#a8edea', '#c3b1e1', '#b5ead7'];
     const color = colors[Math.floor(Math.random() * colors.length)];
     const entry = {
       type: 'sticky',
-      x: cssX / zoom,
-      y: cssY / zoom,
+      x: cssX / scale,
+      y: cssY / scale,
       text: '',
       color
     };
 
     this.saveUndoState(pageIndex);
     this.getPageData(pageIndex).stickyNotes.push(entry);
-    this.renderStickyNoteDOM(pageWrapper, pageIndex, entry, zoom);
+    this.renderStickyNoteDOM(pageWrapper, pageIndex, entry);
+  }
+
+  addImageStamp(pageWrapper, pageIndex, dataUrl, cssX = null, cssY = null, widthBase = 300, heightBase = null) {
+    const scale = this.getPageScale(pageWrapper);
+    const { baseWidth, baseHeight } = this.getBaseDimensions(pageWrapper);
+
+    let x = (cssX !== null) ? (cssX / scale) : (baseWidth / 2 - widthBase / 2);
+    let y = (cssY !== null) ? (cssY / scale) : (baseHeight / 4);
+
+    if (x < 10) x = 10;
+    if (y < 10) y = 10;
+
+    const img = new Image();
+    img.onload = () => {
+      let calcWidth = widthBase;
+      let calcHeight = heightBase;
+      if (!calcHeight) {
+        const aspect = img.naturalHeight / (img.naturalWidth || 1);
+        calcHeight = Math.round(calcWidth * aspect);
+      }
+
+      const entry = {
+        id: 'img_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+        type: 'image',
+        x,
+        y,
+        width: calcWidth,
+        height: calcHeight,
+        dataUrl
+      };
+
+      this.saveUndoState(pageIndex);
+      this.getPageData(pageIndex).imageStamps.push(entry);
+      this.renderImageStampDOM(pageWrapper, pageIndex, entry);
+      if (window.appState) window.appState.scheduleAutoSave();
+    };
+    img.src = dataUrl;
+  }
+
+  renderImageStampDOM(pageWrapper, pageIndex, entry) {
+    const container = pageWrapper.querySelector('.page-overlays');
+    if (!container) return;
+
+    // Avoid duplicate DOM elements for same entry id
+    if (container.querySelector(`.image-stamp[data-id="${entry.id}"]`)) return;
+
+    const scale = this.getPageScale(pageWrapper);
+
+    const stamp = document.createElement('div');
+    stamp.className = 'image-stamp';
+    stamp.dataset.id = entry.id;
+    stamp.style.cssText = `left:${entry.x * scale}px; top:${entry.y * scale}px; width:${entry.width * scale}px; height:${entry.height * scale}px; position:absolute; pointer-events:auto; display:inline-block; border:1.5px dashed transparent; user-select:none; z-index:10; border-radius:4px; box-sizing:border-box;`;
+
+    const controls = document.createElement('div');
+    controls.className = 'image-stamp-controls';
+    controls.style.cssText = `position:absolute; top:-28px; right:0; display:flex; align-items:center; gap:4px; background:rgba(20,20,30,0.9); backdrop-filter:blur(6px); padding:2px 8px; border-radius:4px; border:1px solid rgba(255,255,255,0.2); opacity:0; transition:opacity 0.2s ease; pointer-events:auto; cursor:move; z-index:12; user-select:none; shadow:0 2px 8px rgba(0,0,0,0.3);`;
+    controls.innerHTML = `
+      <span style="font-size:10px; color:#e0e0e0; font-weight:600; padding-right:4px;">🖼️ Screenshot</span>
+      <button class="image-stamp-del-btn" title="Delete Screenshot" style="background:none; border:none; cursor:pointer; color:#ff6b6b; font-size:13px; line-height:18px; padding:0 4px; border-radius:3px; transition:color 0.2s;">✕</button>
+    `;
+
+    const imgEl = document.createElement('img');
+    imgEl.src = entry.dataUrl;
+    imgEl.style.cssText = `width:100%; height:100%; object-fit:contain; display:block; pointer-events:none; border-radius:3px;`;
+
+    const resizeHandle = document.createElement('div');
+    resizeHandle.className = 'image-stamp-resize-handle';
+    resizeHandle.title = 'Drag corner to resize';
+    resizeHandle.style.cssText = `position:absolute; right:-6px; bottom:-6px; width:12px; height:12px; background:var(--accent-color, #6c5ce7); border:2px solid #fff; border-radius:50%; cursor:se-resize; opacity:0; transition:opacity 0.2s ease; z-index:12; box-shadow:0 2px 4px rgba(0,0,0,0.3);`;
+
+    stamp.appendChild(controls);
+    stamp.appendChild(imgEl);
+    stamp.appendChild(resizeHandle);
+
+    stamp.addEventListener('mouseenter', () => {
+      stamp.style.borderColor = 'var(--accent-color, #6c5ce7)';
+      controls.style.opacity = '1';
+      resizeHandle.style.opacity = '1';
+    });
+    stamp.addEventListener('mouseleave', () => {
+      if (!stamp.classList.contains('active-stamp')) {
+        stamp.style.borderColor = 'transparent';
+        controls.style.opacity = '0';
+        resizeHandle.style.opacity = '0';
+      }
+    });
+
+    controls.querySelector('.image-stamp-del-btn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      stamp.remove();
+      const pageData = this.getPageData(pageIndex);
+      pageData.imageStamps = pageData.imageStamps.filter(item => item !== entry && item.id !== entry.id);
+      if (window.appState) window.appState.scheduleAutoSave();
+    });
+
+    this.makeImageDraggable(stamp, controls, pageWrapper, entry);
+    this.makeImageResizable(stamp, resizeHandle, pageWrapper, entry);
+
+    container.appendChild(stamp);
+  }
+
+  makeImageDraggable(el, handle, container, entry) {
+    let startX, startY, startLeft, startTop;
+
+    const onMouseDown = (e) => {
+      if (e.target.classList.contains('image-stamp-del-btn') || e.target.classList.contains('image-stamp-resize-handle')) return;
+      e.preventDefault();
+      e.stopPropagation();
+      startX = e.clientX;
+      startY = e.clientY;
+      startLeft = parseFloat(el.style.left) || 0;
+      startTop = parseFloat(el.style.top) || 0;
+
+      const onMouseMove = (ev) => {
+        const cssX = startLeft + ev.clientX - startX;
+        const cssY = startTop + ev.clientY - startY;
+        el.style.left = `${cssX}px`;
+        el.style.top = `${cssY}px`;
+        const scale = this.getPageScale(container);
+        if (entry) {
+          entry.x = cssX / scale;
+          entry.y = cssY / scale;
+        }
+      };
+
+      const onMouseUp = () => {
+        document.removeEventListener('mousemove', onMouseMove);
+        document.removeEventListener('mouseup', onMouseUp);
+        if (window.appState) window.appState.scheduleAutoSave();
+      };
+
+      document.addEventListener('mousemove', onMouseMove);
+      document.addEventListener('mouseup', onMouseUp);
+    };
+
+    handle.addEventListener('mousedown', onMouseDown);
+    el.addEventListener('mousedown', onMouseDown);
+  }
+
+  makeImageResizable(el, handle, container, entry) {
+    let startX, startY, startW, startH, aspectRatio;
+
+    handle.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      startX = e.clientX;
+      startY = e.clientY;
+      startW = parseFloat(el.style.width) || 100;
+      startH = parseFloat(el.style.height) || 100;
+      aspectRatio = startH / (startW || 1);
+
+      const onMouseMove = (ev) => {
+        const dx = ev.clientX - startX;
+        const newW = Math.max(40, startW + dx);
+        const newH = Math.max(30, Math.round(newW * aspectRatio));
+
+        el.style.width = `${newW}px`;
+        el.style.height = `${newH}px`;
+
+        const scale = this.getPageScale(container);
+        if (entry) {
+          entry.width = newW / scale;
+          entry.height = newH / scale;
+        }
+      };
+
+      const onMouseUp = () => {
+        document.removeEventListener('mousemove', onMouseMove);
+        document.removeEventListener('mouseup', onMouseUp);
+        if (window.appState) window.appState.scheduleAutoSave();
+      };
+
+      document.addEventListener('mousemove', onMouseMove);
+      document.addEventListener('mouseup', onMouseUp);
+    });
   }
 
   makeDraggable(el, handle, container, entry) {
@@ -443,14 +657,14 @@ class AnnotationEngine {
       document.addEventListener('mouseup', onMouseUp);
     };
     const onMouseMove = (e) => {
-      const zoom = window.appState ? window.appState.pdfViewer.zoom : 1.0;
+      const scale = this.getPageScale(container);
       const cssX = startLeft + e.clientX - startX;
       const cssY = startTop + e.clientY - startY;
       el.style.left = `${cssX}px`;
       el.style.top = `${cssY}px`;
       if (entry) {
-        entry.x = cssX / zoom;
-        entry.y = cssY / zoom;
+        entry.x = cssX / scale;
+        entry.y = cssY / scale;
       }
     };
     const onMouseUp = () => {
@@ -467,7 +681,7 @@ class AnnotationEngine {
     if (!this.undoStacks[pageIndex]) this.undoStacks[pageIndex] = [];
     if (!this.redoStacks[pageIndex]) this.redoStacks[pageIndex] = [];
     const data = this.getPageData(pageIndex);
-    const state = JSON.stringify({ strokes: data.strokes });
+    const state = JSON.stringify({ strokes: data.strokes, imageStamps: data.imageStamps || [] });
     this.undoStacks[pageIndex].push(state);
     if (this.undoStacks[pageIndex].length > 50) this.undoStacks[pageIndex].shift();
     this.redoStacks[pageIndex] = [];
@@ -477,9 +691,14 @@ class AnnotationEngine {
     if (!this.undoStacks[pageIndex] || this.undoStacks[pageIndex].length === 0) return;
     const data = this.getPageData(pageIndex);
     if (!this.redoStacks[pageIndex]) this.redoStacks[pageIndex] = [];
-    this.redoStacks[pageIndex].push(JSON.stringify({ strokes: data.strokes }));
+    this.redoStacks[pageIndex].push(JSON.stringify({ strokes: data.strokes, imageStamps: data.imageStamps || [] }));
     const prev = JSON.parse(this.undoStacks[pageIndex].pop());
     data.strokes = prev.strokes;
+    if (prev.imageStamps) {
+      data.imageStamps = prev.imageStamps;
+      const wrapper = canvas.closest('.page-wrapper');
+      if (wrapper) this.restorePageOverlays(wrapper, pageIndex);
+    }
     this.redrawPage(canvas, pageIndex);
     if (window.appState) window.appState.scheduleAutoSave();
   }
@@ -488,9 +707,14 @@ class AnnotationEngine {
     if (!this.redoStacks[pageIndex] || this.redoStacks[pageIndex].length === 0) return;
     const data = this.getPageData(pageIndex);
     if (!this.undoStacks[pageIndex]) this.undoStacks[pageIndex] = [];
-    this.undoStacks[pageIndex].push(JSON.stringify({ strokes: data.strokes }));
+    this.undoStacks[pageIndex].push(JSON.stringify({ strokes: data.strokes, imageStamps: data.imageStamps || [] }));
     const next = JSON.parse(this.redoStacks[pageIndex].pop());
     data.strokes = next.strokes;
+    if (next.imageStamps) {
+      data.imageStamps = next.imageStamps;
+      const wrapper = canvas.closest('.page-wrapper');
+      if (wrapper) this.restorePageOverlays(wrapper, pageIndex);
+    }
     this.redrawPage(canvas, pageIndex);
     if (window.appState) window.appState.scheduleAutoSave();
   }
@@ -504,6 +728,7 @@ class AnnotationEngine {
         strokes: data.strokes,
         textBoxes: data.textBoxes.map(t => ({ ...t })),
         stickyNotes: data.stickyNotes.map(s => ({ type: s.type, x: s.x, y: s.y, text: s.text, color: s.color })),
+        imageStamps: (data.imageStamps || []).map(img => ({ id: img.id, type: 'image', x: img.x, y: img.y, width: img.width, height: img.height, dataUrl: img.dataUrl })),
       };
     }
     return out;
@@ -515,6 +740,7 @@ class AnnotationEngine {
         strokes: pageData.strokes || [],
         textBoxes: pageData.textBoxes || [],
         stickyNotes: pageData.stickyNotes || [],
+        imageStamps: pageData.imageStamps || [],
       };
     }
   }
@@ -524,13 +750,17 @@ class AnnotationEngine {
     if (container) container.innerHTML = '';
 
     const pageData = this.getPageData(pageIndex);
-    const zoom = window.appState ? window.appState.pdfViewer.zoom : 1.0;
 
     for (const tb of pageData.textBoxes) {
-      this.renderTextBoxDOM(pageWrapper, pageIndex, tb, zoom);
+      this.renderTextBoxDOM(pageWrapper, pageIndex, tb);
     }
     for (const sn of pageData.stickyNotes) {
-      this.renderStickyNoteDOM(pageWrapper, pageIndex, sn, zoom);
+      this.renderStickyNoteDOM(pageWrapper, pageIndex, sn);
+    }
+    if (pageData.imageStamps) {
+      for (const img of pageData.imageStamps) {
+        this.renderImageStampDOM(pageWrapper, pageIndex, img);
+      }
     }
   }
 }

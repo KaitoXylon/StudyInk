@@ -113,6 +113,30 @@ class ExportManager {
       if (pdfCanvas && pdfCanvas.width > 0) ctx.drawImage(pdfCanvas, 0, 0);
       if (annotCanvas && annotCanvas.width > 0) ctx.drawImage(annotCanvas, 0, 0);
 
+      // Render overlay image stamps into merged canvas for export
+      const pageData = isSplit
+        ? window.appState?.splitViewManager?._getState(side)?.annotEngine?.getPageData(i)
+        : this.annotEngine.getPageData(i);
+
+      if (pageData && pageData.imageStamps && pageData.imageStamps.length > 0) {
+        const baseW = parseFloat(wrapper?.dataset.baseWidth) || 595;
+        const baseH = parseFloat(wrapper?.dataset.baseHeight) || 842;
+        const scaleX = mergedCanvas.width / baseW;
+        const scaleY = mergedCanvas.height / baseH;
+
+        for (const imgStamp of pageData.imageStamps) {
+          await new Promise((resolve) => {
+            const img = new Image();
+            img.onload = () => {
+              ctx.drawImage(img, imgStamp.x * scaleX, imgStamp.y * scaleY, imgStamp.width * scaleX, imgStamp.height * scaleY);
+              resolve();
+            };
+            img.onerror = resolve;
+            img.src = imgStamp.dataUrl;
+          });
+        }
+      }
+
       // Convert canvas to PNG
       const imgData = mergedCanvas.toDataURL('image/png');
       const base64 = imgData.split(',')[1];

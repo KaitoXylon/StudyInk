@@ -1222,6 +1222,33 @@ body {
   line-height: 1.5;
 }
 
+/* Image Stamps (Pasted Screenshots) */
+.image-stamp {
+  position: absolute;
+  cursor: move;
+  z-index: 10;
+  transition: border-color var(--t-fast);
+}
+
+.image-stamp:hover,
+.image-stamp.active-stamp {
+  border-color: var(--accent, #6c5ce7) !important;
+}
+
+.image-stamp:hover .image-stamp-controls,
+.image-stamp:hover .image-stamp-resize-handle {
+  opacity: 1 !important;
+}
+
+.image-stamp-controls {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.image-stamp-del-btn:hover {
+  background: rgba(255, 87, 87, 0.25) !important;
+  color: #ff4d4d !important;
+}
+
 /* ══════════════════════════════════════════
    MODALS
 ══════════════════════════════════════════ */

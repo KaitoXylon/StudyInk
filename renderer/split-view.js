@@ -441,7 +441,7 @@ class SplitViewManager {
       width  = Math.floor(cssVP.width);
       height = Math.floor(cssVP.height);
 
-      const wrapper = this._createPageWrapper(side, pageIndex, width, height, false);
+      const wrapper = this._createPageWrapper(side, pageIndex, width, height, false, pageDesc.baseWidth, pageDesc.baseHeight);
       this._insertWrapperAtIndex(container, wrapper, pageIndex);
 
       const pdfCanvas = wrapper.querySelector('.page-pdf-canvas');
@@ -459,7 +459,7 @@ class SplitViewManager {
       width  = Math.floor(pageDesc.baseWidth  * state.zoom);
       height = Math.floor(pageDesc.baseHeight * state.zoom);
 
-      const wrapper = this._createPageWrapper(side, pageIndex, width, height, true);
+      const wrapper = this._createPageWrapper(side, pageIndex, width, height, true, pageDesc.baseWidth, pageDesc.baseHeight);
       this._insertWrapperAtIndex(container, wrapper, pageIndex);
     }
 
@@ -509,11 +509,13 @@ class SplitViewManager {
     pageDesc.rendered = true;
   }
 
-  _createPageWrapper(side, pageIndex, width, height, isBlank) {
+  _createPageWrapper(side, pageIndex, width, height, isBlank, baseWidth = 595, baseHeight = 842) {
     const wrapper = document.createElement('div');
     wrapper.className = 'page-wrapper';
     wrapper.dataset.page = pageIndex;
     wrapper.dataset.pane = side;
+    wrapper.dataset.baseWidth = baseWidth;
+    wrapper.dataset.baseHeight = baseHeight;
     wrapper.style.width  = `${width}px`;
     wrapper.style.height = `${height}px`;
 

@@ -20,4 +20,8 @@ contextBridge.exposeInMainWorld('studyAPI', {
   // Settings
   loadSettings: () => ipcRenderer.invoke('load-settings'),
   saveSettings: (settings) => ipcRenderer.invoke('save-settings', settings),
+
+  // Clipboard
+  readClipboardImage: () => ipcRenderer.invoke('read-clipboard-image'),
+  writeClipboardImage: (dataUrl) => ipcRenderer.invoke('write-clipboard-image', dataUrl),
 });
