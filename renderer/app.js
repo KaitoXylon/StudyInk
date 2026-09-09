@@ -48,6 +48,9 @@ class AppState {
 
     // Initialize split view (after DOM is ready)
     this.splitViewManager = new SplitViewManager(this);
+
+    // Initialize Google Drive sync
+    this.driveManager = new DriveManager(this);
   }
 
   async loadPDFLib() {
@@ -171,6 +174,10 @@ class AppState {
     if (this.currentFilePath) {
       const state = this.buildSaveState();
       await window.studyAPI.saveAnnotations(this.currentFilePath, state);
+      // Sync to Google Drive (non-blocking)
+      if (this.driveManager) {
+        this.driveManager.syncAfterSave(this.currentFilePath, state);
+      }
     }
   }
 
@@ -794,9 +801,17 @@ class AppState {
         else if (key === 'n' || code === 'KeyN') tool = 'sticky';
         else if (key === 'v' || code === 'KeyV') tool = 'select';
         else if (key === 's' || code === 'KeyS') tool = 'shape';
+        else if (key === 'l' || code === 'KeyL') tool = 'lasso';
         else if (key === 'b' || code === 'KeyB') {
           e.preventDefault();
           this.bookmarkManager.toggleBookmark();
+        }
+
+        // Delete key deletes active lasso selection
+        if ((e.key === 'Delete' || e.key === 'Backspace') && this.annotationEngine?.hasActiveSelection()) {
+          e.preventDefault();
+          this.annotationEngine.deleteSelectedStrokes();
+          return;
         }
 
         // Arrow keys: Up/Down change pen size, Left/Right change pen color
@@ -819,6 +834,10 @@ class AppState {
           this.selectTool(tool);
         }
         if (e.key === 'Escape') {
+          if (this.annotationEngine?.hasActiveSelection()) {
+            this.annotationEngine.clearSelection();
+            return;
+          }
           const hasOpenModal = [...document.querySelectorAll('.modal')].some(m => !m.classList.contains('hidden'));
           if (hasOpenModal) {
             document.querySelectorAll('.modal').forEach(m => m.classList.add('hidden'));

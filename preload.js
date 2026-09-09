@@ -24,4 +24,19 @@ contextBridge.exposeInMainWorld('studyAPI', {
   // Clipboard
   readClipboardImage: () => ipcRenderer.invoke('read-clipboard-image'),
   writeClipboardImage: (dataUrl) => ipcRenderer.invoke('write-clipboard-image', dataUrl),
+
+  // Google Drive Sync
+  driveGetStatus: () => ipcRenderer.invoke('drive-get-status'),
+  driveConnect: () => ipcRenderer.invoke('drive-connect'),
+  driveDisconnect: () => ipcRenderer.invoke('drive-disconnect'),
+  driveUploadPDF: (localFilePath) => ipcRenderer.invoke('drive-upload-pdf', localFilePath),
+  driveUploadAnnotations: (pdfPath, data) => ipcRenderer.invoke('drive-upload-annotations', pdfPath, data),
+  driveListFiles: () => ipcRenderer.invoke('drive-list-files'),
+  driveDownloadFile: (fileId, localDestPath) => ipcRenderer.invoke('drive-download-file', fileId, localDestPath),
+  driveForceDownload: (fileId, localDestPath) => ipcRenderer.invoke('drive-force-download', fileId, localDestPath),
+  driveDownloadAnnotations: (pdfPath) => ipcRenderer.invoke('drive-download-annotations', pdfPath),
+  driveGetDownloadsPath: () => ipcRenderer.invoke('drive-get-downloads-path'),
+
+  // File operations
+  renameFile: (oldPath, newName) => ipcRenderer.invoke('rename-file', oldPath, newName),
 });

@@ -62,87 +62,230 @@ const ShapeRecognition = (() => {
    * Check if stroke is a straight line
    */
   function isLine(pts) {
-    const simplified = rdpSimplify(pts, 4);
-    if (simplified.length > 3) return false;
-    const bb = getBoundingBox(pts);
-    const diag = Math.hypot(bb.w, bb.h);
+    if (pts.length < 2) return null;
+    const start = pts[0], end = pts[pts.length - 1];
+    const euclidDist = Math.hypot(end.x - start.x, end.y - start.y);
+    if (euclidDist < 15) return null;
+
     const actualLen = strokeLength(pts);
-    // Straight lines: actual length close to bounding diagonal
-    return actualLen / diag < 1.25 && diag > 15;
+    const ratio = actualLen / euclidDist;
+    if (ratio > 1.32) return null;
+
+    const simplified = rdpSimplify(pts, Math.max(3.5, euclidDist * 0.04));
+    if (simplified.length > 4) return null;
+
+    let x1 = start.x, y1 = start.y, x2 = end.x, y2 = end.y;
+    const dx = x2 - x1, dy = y2 - y1;
+    const deg = Math.abs(Math.atan2(dy, dx) * 180 / Math.PI);
+
+    // Angle snapping: horizontal (within 7.5 deg)
+    if (deg < 7.5 || deg > 172.5) {
+      y2 = y1;
+    }
+    // Vertical (within 7.5 deg)
+    else if (Math.abs(deg - 90) < 7.5) {
+      x2 = x1;
+    }
+    // 45-degree diagonals (within 5 deg)
+    else if (Math.abs(deg - 45) < 5 || Math.abs(deg - 135) < 5) {
+      const signX = dx >= 0 ? 1 : -1;
+      const signY = dy >= 0 ? 1 : -1;
+      const avgLen = (Math.abs(dx) + Math.abs(dy)) / 2;
+      x2 = x1 + signX * avgLen;
+      y2 = y1 + signY * avgLen;
+    }
+
+    return { type: 'line', x1, y1, x2, y2 };
+  }
+
+  /**
+   * Check if stroke is a circle
+   */
+  function isCircle(pts) {
+    if (pts.length < 8) return null;
+    const bb = getBoundingBox(pts);
+    if (bb.w < 15 || bb.h < 15) return null;
+
+    const start = pts[0], end = pts[pts.length - 1];
+    const closingDist = Math.hypot(end.x - start.x, end.y - start.y);
+    if (closingDist > (bb.w + bb.h) * 0.42) return null;
+
+    const centroid = getCentroid(pts);
+    const aspect = bb.w / (bb.h || 1);
+    if (aspect < 0.65 || aspect > 1.52) return null;
+
+    const dists = pts.map(p => Math.hypot(p.x - centroid.x, p.y - centroid.y));
+    const avgR = dists.reduce((a, b) => a + b, 0) / dists.length;
+    const variance = dists.reduce((a, b) => a + Math.pow(b - avgR, 2), 0) / dists.length;
+    const coeffVar = Math.sqrt(variance) / (avgR || 1);
+
+    if (coeffVar < 0.28) {
+      const r = (bb.w + bb.h) / 4;
+      return { type: 'circle', cx: centroid.x, cy: centroid.y, r };
+    }
+    return null;
+  }
+
+  /**
+   * Check if stroke is an ellipse
+   */
+  function isEllipse(pts) {
+    if (pts.length < 10) return null;
+    const bb = getBoundingBox(pts);
+    if (bb.w < 15 || bb.h < 15) return null;
+
+    const start = pts[0], end = pts[pts.length - 1];
+    const closingDist = Math.hypot(end.x - start.x, end.y - start.y);
+    if (closingDist > (bb.w + bb.h) * 0.42) return null;
+
+    const centroid = getCentroid(pts);
+    const rx = bb.w / 2, ry = bb.h / 2;
+    let errors = 0;
+    for (const p of pts) {
+      const dx = (p.x - centroid.x) / rx;
+      const dy = (p.y - centroid.y) / ry;
+      const val = dx*dx + dy*dy;
+      if (Math.abs(val - 1) > 0.65) errors++;
+    }
+    if ((errors / pts.length) < 0.35) {
+      return { type: 'ellipse', cx: centroid.x, cy: centroid.y, rx, ry };
+    }
+    return null;
+  }
+
+  /**
+   * Check if stroke is a triangle
+   */
+  function isTriangle(pts) {
+    if (pts.length < 8) return null;
+    const bb = getBoundingBox(pts);
+    if (bb.w < 15 || bb.h < 15) return null;
+
+    const start = pts[0], end = pts[pts.length - 1];
+    const closingDist = Math.hypot(end.x - start.x, end.y - start.y);
+    if (closingDist > (bb.w + bb.h) * 0.42) return null;
+
+    const simplified = rdpSimplify(pts, Math.max(7, (bb.w + bb.h) * 0.08));
+    if (simplified.length >= 4 && simplified.length <= 5) {
+      return {
+        type: 'triangle',
+        p1: { x: simplified[0].x, y: simplified[0].y },
+        p2: { x: simplified[1].x, y: simplified[1].y },
+        p3: { x: simplified[2].x, y: simplified[2].y }
+      };
+    }
+    return null;
   }
 
   /**
    * Check if stroke is a rectangle
    */
   function isRectangle(pts) {
-    const simplified = rdpSimplify(pts, 6);
-    if (simplified.length < 4 || simplified.length > 8) return false;
+    if (pts.length < 6) return null;
     const bb = getBoundingBox(pts);
-    if (bb.w < 20 || bb.h < 20) return false;
-    // Check if the stroke roughly closes back to start
+    if (bb.w < 15 || bb.h < 15) return null;
+
     const start = pts[0], end = pts[pts.length - 1];
     const closingDist = Math.hypot(end.x - start.x, end.y - start.y);
     const perimeter = 2 * (bb.w + bb.h);
     const strokeLen = strokeLength(pts);
-    return closingDist < (bb.w + bb.h) * 0.4 && strokeLen / perimeter < 1.6;
-  }
 
-  /**
-   * Check if stroke is a circle/ellipse
-   */
-  function isCircle(pts) {
-    if (pts.length < 20) return false;
-    const bb = getBoundingBox(pts);
-    if (bb.w < 20 || bb.h < 20) return false;
-    const centroid = getCentroid(pts);
-    const rx = bb.w / 2, ry = bb.h / 2;
-    // Check if start and end are close (closed curve)
-    const start = pts[0], end = pts[pts.length - 1];
-    const closingDist = Math.hypot(end.x - start.x, end.y - start.y);
-    if (closingDist > (bb.w + bb.h) * 0.35) return false;
-    // Check that points are roughly on an ellipse
-    let errors = 0;
-    for (const p of pts) {
-      const dx = (p.x - centroid.x) / rx;
-      const dy = (p.y - centroid.y) / ry;
-      const val = dx*dx + dy*dy;
-      if (Math.abs(val - 1) > 0.7) errors++;
-    }
-    return (errors / pts.length) < 0.4;
-  }
+    if (closingDist > (bb.w + bb.h) * 0.42) return null;
+    if (strokeLen / perimeter > 1.65) return null;
 
-  /**
-   * Check if stroke is an arrow (line with a pointed end)
-   * Arrow: mostly a straight line, last few points change direction sharply
-   */
-  function isArrow(pts) {
-    if (!isLine(pts)) return false;
-    // Check for a V shape at the end
-    if (pts.length < 10) return false;
-    const tail = pts.slice(-Math.floor(pts.length * 0.2));
-    // The tail should diverge from the main line direction
-    return false; // simplified: skip for now
-  }
-
-  /**
-   * Main recognition function. Returns { type, params } or null if no shape detected.
-   */
-  function recognize(pts) {
-    if (pts.length < 5) return null;
-    if (isCircle(pts)) {
-      const bb = getBoundingBox(pts);
-      const centroid = getCentroid(pts);
-      return { type: 'ellipse', cx: centroid.x, cy: centroid.y, rx: bb.w/2, ry: bb.h/2 };
-    }
-    if (isRectangle(pts)) {
-      const bb = getBoundingBox(pts);
-      return { type: 'rect', x: bb.minX, y: bb.minY, w: bb.w, h: bb.h };
-    }
-    if (isLine(pts)) {
-      const start = pts[0], end = pts[pts.length - 1];
-      return { type: 'line', x1: start.x, y1: start.y, x2: end.x, y2: end.y };
+    const simplified = rdpSimplify(pts, Math.max(5, (bb.w + bb.h) * 0.06));
+    if (simplified.length >= 4 && simplified.length <= 8) {
+      return {
+        type: 'rect',
+        x: bb.minX,
+        y: bb.minY,
+        w: bb.w,
+        h: bb.h,
+        origX: bb.minX,
+        origY: bb.minY
+      };
     }
     return null;
+  }
+
+  /**
+   * Main recognition function. Returns { type, ... } or null if no shape detected.
+   */
+  function recognize(pts) {
+    if (!pts || pts.length < 4) return null;
+
+    const bb = getBoundingBox(pts);
+    const start = pts[0], end = pts[pts.length - 1];
+    const closingDist = Math.hypot(end.x - start.x, end.y - start.y);
+    const isClosed = closingDist < (bb.w + bb.h) * 0.42;
+
+    if (isClosed) {
+      const circle = isCircle(pts);
+      if (circle) return circle;
+
+      const tri = isTriangle(pts);
+      if (tri) return tri;
+
+      const rect = isRectangle(pts);
+      if (rect) return rect;
+
+      const ellipse = isEllipse(pts);
+      if (ellipse) return ellipse;
+    }
+
+    // Check line
+    const line = isLine(pts);
+    if (line) return line;
+
+    // Check unclosed or loosely closed circle/rect
+    const circleFallback = isCircle(pts);
+    if (circleFallback) return circleFallback;
+
+    const rectFallback = isRectangle(pts);
+    if (rectFallback) return rectFallback;
+
+    return null;
+  }
+
+  /**
+   * Adjust shape dynamically based on pointer position while user holds down
+   */
+  function updateShapeWithPointer(shape, currentPos) {
+    if (!shape || !currentPos) return;
+
+    if (shape.type === 'line') {
+      let x1 = shape.x1, y1 = shape.y1;
+      let x2 = currentPos.x, y2 = currentPos.y;
+      const dx = x2 - x1, dy = y2 - y1;
+      const deg = Math.abs(Math.atan2(dy, dx) * 180 / Math.PI);
+
+      if (deg < 7.5 || deg > 172.5) {
+        y2 = y1;
+      } else if (Math.abs(deg - 90) < 7.5) {
+        x2 = x1;
+      } else if (Math.abs(deg - 45) < 5 || Math.abs(deg - 135) < 5) {
+        const signX = dx >= 0 ? 1 : -1;
+        const signY = dy >= 0 ? 1 : -1;
+        const avgLen = (Math.abs(dx) + Math.abs(dy)) / 2;
+        x2 = x1 + signX * avgLen;
+        y2 = y1 + signY * avgLen;
+      }
+
+      shape.x2 = x2;
+      shape.y2 = y2;
+    } else if (shape.type === 'circle') {
+      shape.r = Math.max(4, Math.hypot(currentPos.x - shape.cx, currentPos.y - shape.cy));
+    } else if (shape.type === 'ellipse') {
+      shape.rx = Math.max(4, Math.abs(currentPos.x - shape.cx));
+      shape.ry = Math.max(4, Math.abs(currentPos.y - shape.cy));
+    } else if (shape.type === 'rect') {
+      const origX = shape.origX !== undefined ? shape.origX : shape.x;
+      const origY = shape.origY !== undefined ? shape.origY : shape.y;
+      shape.x = Math.min(origX, currentPos.x);
+      shape.y = Math.min(origY, currentPos.y);
+      shape.w = Math.max(4, Math.abs(currentPos.x - origX));
+      shape.h = Math.max(4, Math.abs(currentPos.y - origY));
+    }
   }
 
   /**
@@ -161,10 +304,17 @@ const ShapeRecognition = (() => {
     if (shape.type === 'line') {
       ctx.moveTo(shape.x1, shape.y1);
       ctx.lineTo(shape.x2, shape.y2);
+    } else if (shape.type === 'circle') {
+      ctx.arc(shape.cx, shape.cy, Math.max(1, shape.r), 0, Math.PI * 2);
+    } else if (shape.type === 'ellipse') {
+      ctx.ellipse(shape.cx, shape.cy, Math.max(1, shape.rx), Math.max(1, shape.ry), 0, 0, Math.PI * 2);
     } else if (shape.type === 'rect') {
       ctx.rect(shape.x, shape.y, shape.w, shape.h);
-    } else if (shape.type === 'ellipse') {
-      ctx.ellipse(shape.cx, shape.cy, shape.rx, shape.ry, 0, 0, Math.PI * 2);
+    } else if (shape.type === 'triangle' && shape.p1 && shape.p2 && shape.p3) {
+      ctx.moveTo(shape.p1.x, shape.p1.y);
+      ctx.lineTo(shape.p2.x, shape.p2.y);
+      ctx.lineTo(shape.p3.x, shape.p3.y);
+      ctx.closePath();
     }
 
     ctx.stroke();
@@ -172,7 +322,7 @@ const ShapeRecognition = (() => {
     return shape;
   }
 
-  return { recognize, drawShape, rdpSimplify, getBoundingBox };
+  return { recognize, drawShape, updateShapeWithPointer, rdpSimplify, getBoundingBox };
 })();
 
 window.ShapeRecognition = ShapeRecognition;

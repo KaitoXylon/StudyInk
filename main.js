@@ -2,6 +2,14 @@ const { app, BrowserWindow, ipcMain, dialog, Menu, shell, clipboard, nativeImage
 const path = require('path');
 const fs = require('fs');
 
+// Load environment variables from .env file
+require('dotenv').config({ path: path.join(__dirname, '.env') });
+
+const DriveSyncManager = require('./drive-sync');
+
+// Drive sync singleton (initialized after app is ready)
+let driveSync = null;
+
 // Keep a global reference of the window object
 let mainWindow;
 
@@ -42,7 +50,11 @@ function createWindow() {
   });
 }
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+  createWindow();
+  // Initialize drive sync after app is ready
+  driveSync = new DriveSyncManager(app.getPath('userData'));
+});
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
@@ -190,3 +202,122 @@ ipcMain.handle('write-clipboard-image', (event, dataUrl) => {
     return { success: false, error: err.message };
   }
 });
+
+// ─── Google Drive IPC Handlers ──────────────────────────────────────────────
+
+ipcMain.handle('drive-get-status', async () => {
+  try {
+    if (!driveSync) return { connected: false, email: null };
+    return await driveSync.getStatus();
+  } catch (err) {
+    return { connected: false, email: null, error: err.message };
+  }
+});
+
+ipcMain.handle('drive-connect', async () => {
+  try {
+    if (!driveSync) return { success: false, error: 'Drive sync not initialized' };
+    const result = await driveSync.connect();
+    return result;
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('drive-disconnect', async () => {
+  try {
+    if (!driveSync) return { success: false };
+    return await driveSync.disconnect();
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('drive-upload-pdf', async (event, localFilePath) => {
+  try {
+    if (!driveSync || !driveSync.isConnected()) return { success: false, error: 'Not connected' };
+    const result = await driveSync.uploadPDF(localFilePath);
+    return result;
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('drive-upload-annotations', async (event, pdfPath, annotationData) => {
+  try {
+    if (!driveSync || !driveSync.isConnected()) return { success: false, error: 'Not connected' };
+    const result = await driveSync.uploadAnnotations(pdfPath, annotationData);
+    return result;
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('drive-list-files', async () => {
+  try {
+    if (!driveSync || !driveSync.isConnected()) return { success: false, error: 'Not connected', files: [] };
+    const files = await driveSync.listFiles();
+    return { success: true, files };
+  } catch (err) {
+    return { success: false, error: err.message, files: [] };
+  }
+});
+
+ipcMain.handle('drive-download-file', async (event, fileId, localDestPath) => {
+  try {
+    if (!driveSync || !driveSync.isConnected()) return { success: false, error: 'Not connected' };
+    // Ensure destination directory exists
+    const dir = path.dirname(localDestPath);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    const result = await driveSync.downloadFile(fileId, localDestPath);
+    return result;
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('drive-force-download', async (event, fileId, localDestPath) => {
+  try {
+    if (!driveSync || !driveSync.isConnected()) return { success: false, error: 'Not connected' };
+    const dir = path.dirname(localDestPath);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    const result = await driveSync.forceDownload(fileId, localDestPath);
+    return result;
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('drive-download-annotations', async (event, pdfPath) => {
+  try {
+    if (!driveSync || !driveSync.isConnected()) return null;
+    return await driveSync.downloadAnnotations(pdfPath);
+  } catch (err) {
+    return null;
+  }
+});
+
+ipcMain.handle('drive-get-downloads-path', () => {
+  return app.getPath('downloads');
+});
+
+// Rename a PDF file on disk
+ipcMain.handle('rename-file', async (event, oldPath, newName) => {
+  try {
+    if (!newName || !newName.trim()) return { success: false, error: 'Name cannot be empty' };
+    // Ensure .pdf extension
+    let safeName = newName.trim();
+    if (!safeName.toLowerCase().endsWith('.pdf')) safeName += '.pdf';
+    // Sanitize: remove illegal chars
+    safeName = safeName.replace(/[<>:"/\\|?*]/g, '_');
+    const dir = path.dirname(oldPath);
+    const newPath = path.join(dir, safeName);
+    if (newPath === oldPath) return { success: true, newPath, newName: safeName }; // no change
+    if (fs.existsSync(newPath)) return { success: false, error: 'A file with that name already exists' };
+    fs.renameSync(oldPath, newPath);
+    return { success: true, newPath, newName: safeName };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+

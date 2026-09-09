@@ -7,14 +7,21 @@
     "start": "electron .",
     "dev": "electron . --enable-logging"
   },
-  "keywords": ["pdf", "study", "annotation", "electron"],
+  "keywords": [
+    "pdf",
+    "study",
+    "annotation",
+    "electron"
+  ],
   "author": "",
   "license": "ISC",
   "devDependencies": {
     "electron": "^36.4.0"
   },
   "dependencies": {
+    "dotenv": "^17.4.2",
     "electron-store": "^8.1.0",
+    "googleapis": "^174.0.1",
     "pdf-lib": "^1.17.1"
   }
 }
